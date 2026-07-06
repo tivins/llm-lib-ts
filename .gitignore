@@ -1,0 +1,8 @@
+node_modules
+*.log
+
+/* IDEs */
+.idea/
+.vscode/
+.cursor/
+.claude/
