@@ -1,3 +1,4 @@
+import { ChatCompletionChunk } from '../../../src/ChatCompletionChunk';
 import type { ChatCompletionResponse } from '../../../src/ChatCompletionResponse';
 import type { EmbeddingResponse } from '../../../src/EmbeddingResponse';
 import type { LLMClient } from '../../../src/LLMClient';
@@ -15,6 +16,19 @@ export class StubLLM implements LLMClient {
     const response = this.queue.shift();
     if (!response) {
       throw new Error('StubLLM: no enqueued response left');
+    }
+    return response;
+  }
+
+  async chatCompletionStream(
+    _conversation: unknown,
+    _options: unknown,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): Promise<ChatCompletionResponse> {
+    const response = await this.chatCompletion();
+    const message = response.firstChoice()?.message;
+    if (message) {
+      onChunk(new ChatCompletionChunk(0, message.content, message.reasoningContent, null, response.finishReason() ?? null));
     }
     return response;
   }

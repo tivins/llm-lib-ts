@@ -225,6 +225,94 @@ describe('LLM.chatCompletion', () => {
   });
 });
 
+function sseResponse(events: string[], status = 200): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const event of events) {
+        controller.enqueue(encoder.encode(`data: ${event}\n\n`));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, { status });
+}
+
+describe('LLM.chatCompletionStream', () => {
+  test('emits incremental content chunks and resolves the accumulated response', async () => {
+    stubFetch(
+      sseResponse([
+        JSON.stringify({ model: 'test-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'Hel' } }] }),
+        JSON.stringify({ model: 'test-model', choices: [{ index: 0, delta: { content: 'lo.' } }] }),
+        JSON.stringify({ model: 'test-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+        JSON.stringify({ model: 'test-model', choices: [], usage: { prompt_tokens: 2, completion_tokens: 4, total_tokens: 6 } }),
+        '[DONE]',
+      ]),
+    );
+
+    const chunks: string[] = [];
+    const llm = new LLM('http://localhost:8080');
+    const result = await llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), (chunk) => {
+      if (chunk.delta) {
+        chunks.push(chunk.delta);
+      }
+    });
+
+    expect(chunks).toEqual(['Hel', 'lo.']);
+    expect(result.model).toBe('test-model');
+    expect(result.choices[0].message.content).toBe('Hello.');
+    expect(result.choices[0].message.role).toBe(Role.Assistant);
+    expect(result.choices[0].finishReason).toBe('stop');
+    expect(result.usage.promptTokens).toBe(2);
+    expect(result.usage.completionTokens).toBe(4);
+    expect(result.usage.totalTokens).toBe(6);
+  });
+
+  test('accumulates streamed tool call argument fragments by index', async () => {
+    stubFetch(
+      sseResponse([
+        JSON.stringify({
+          model: 'test-model',
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: 'assistant',
+                tool_calls: [{ index: 0, id: 'call_1', function: { name: 'echo', arguments: '{"x":' } }],
+              },
+            },
+          ],
+        }),
+        JSON.stringify({
+          model: 'test-model',
+          choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '1}' } }] } }],
+        }),
+        JSON.stringify({ model: 'test-model', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+        '[DONE]',
+      ]),
+    );
+
+    const llm = new LLM('http://localhost:8080');
+    const result = await llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {});
+
+    const toolCalls = result.choices[0].message.toolCalls;
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls?.[0].id).toBe('call_1');
+    expect(toolCalls?.[0].name).toBe('echo');
+    expect(toolCalls?.[0].argumentsJson).toBe('{"x":1}');
+    expect(result.choices[0].finishReason).toBe('tool_calls');
+  });
+
+  test('throws with the error message on an HTTP error status', async () => {
+    stubFetch(jsonResponse(500, { error: { message: 'boom' } }));
+
+    const llm = new LLM('http://localhost:8080');
+    await expect(
+      llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {}),
+    ).rejects.toThrow('LLM request failed: boom');
+  });
+});
+
 describe('LLM.tokenize', () => {
   test('extracts token ids from plain numbers and object entries', async () => {
     stubFetch(jsonResponse(200, { tokens: [1, { id: 2 }, 3] }));

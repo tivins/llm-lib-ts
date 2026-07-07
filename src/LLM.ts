@@ -1,3 +1,4 @@
+import { ChatCompletionChunk } from './ChatCompletionChunk';
 import type { ChatCompletionOptions } from './ChatCompletionOptions';
 import { ChatCompletionResponse } from './ChatCompletionResponse';
 import { Choice } from './Choice';
@@ -13,7 +14,17 @@ import { RerankResponse } from './RerankResponse';
 import { RerankResult } from './RerankResult';
 import { Role } from './Role';
 import { ToolCall } from './ToolCall';
+import { ToolCallDelta } from './ToolCallDelta';
 import { Usage } from './Usage';
+
+/** Per-choice state accumulated while consuming a streamed chat completion. */
+interface StreamChoiceAccumulator {
+  role: string;
+  content: string;
+  reasoning: string;
+  toolCalls: Map<number, { id: string; name: string; argumentsJson: string }>;
+  finishReason: string | null;
+}
 
 const ROLE_VALUES: readonly string[] = Object.values(Role);
 
@@ -94,6 +105,117 @@ export class LLM implements LLMClient {
     const elapsedMs = performance.now() - start;
 
     return new ChatCompletionResponse(data.model, usage, choices, data, elapsedMs);
+  }
+
+  /**
+   * Streams a chat completion, invoking `onChunk` for each incremental delta as it arrives,
+   * and resolves with the same accumulated `ChatCompletionResponse` shape as `chatCompletion`.
+   */
+  async chatCompletionStream(
+    conversation: Conversation,
+    options: ChatCompletionOptions,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): Promise<ChatCompletionResponse> {
+    const start = performance.now();
+    const body = JSON.stringify({
+      messages: conversation.toChatCompletionPayload(),
+      ...options.toRequestPayload(this.defaultModel),
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.apiKey !== undefined) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(this.endpoint + '/v1/chat/completions', {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(this.timeoutSeconds * 1000),
+      });
+    } catch (e) {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    }
+
+    if (response.status >= 400) {
+      const text = await response.text();
+      throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
+    }
+    if (!response.body) {
+      throw new Error('LLM streaming response has no body');
+    }
+
+    const accumulators = new Map<number, StreamChoiceAccumulator>();
+    let usage = new Usage(0, 0, 0);
+    let model = this.defaultModel ?? 'unknown';
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        let separatorIndex: number;
+        while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, separatorIndex);
+          buffer = buffer.slice(separatorIndex + 2);
+
+          const event = LLM.parseSseEvent(rawEvent);
+          if (!event) {
+            continue;
+          }
+          if (typeof event.model === 'string') {
+            model = event.model;
+          }
+          if (event.usage) {
+            usage = new Usage(
+              event.usage.prompt_tokens ?? 0,
+              event.usage.completion_tokens ?? 0,
+              event.usage.total_tokens ?? 0,
+            );
+          }
+          LLM.applyStreamEvent(event, accumulators, onChunk);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const choices = Array.from(accumulators.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([index, acc]) => {
+        const toolCalls =
+          acc.toolCalls.size > 0
+            ? Array.from(acc.toolCalls.values()).map((call) => new ToolCall(call.id, call.name, call.argumentsJson))
+            : null;
+        const [content, reasoningContent] = LLM.normalizeAssistantContent(acc.content, acc.reasoning || null);
+
+        return new Choice(
+          index,
+          new Message(
+            ROLE_VALUES.includes(acc.role) ? (acc.role as Role) : Role.Assistant,
+            content,
+            reasoningContent,
+            {},
+            toolCalls,
+          ),
+          acc.finishReason ?? 'stop',
+        );
+      });
+
+    const elapsedMs = performance.now() - start;
+
+    return new ChatCompletionResponse(model, usage, choices, null, elapsedMs);
   }
 
   async embeddings(
@@ -207,14 +329,113 @@ export class LLM implements LLMClient {
 
     const parsed = data as Record<string, any>;
     if (response.status >= 400 || parsed.error !== undefined) {
-      let message = parsed.error?.message ?? parsed.error ?? `HTTP ${response.status}`;
-      if (typeof message === 'object') {
-        message = JSON.stringify(message);
-      }
-      throw new Error(`LLM request failed: ${message}`);
+      throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
     }
 
     return parsed;
+  }
+
+  private static extractErrorMessage(text: string, status: number): string {
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return `HTTP ${status}`;
+    }
+    if (typeof data !== 'object' || data === null) {
+      return `HTTP ${status}`;
+    }
+
+    const parsed = data as Record<string, any>;
+    let message = parsed.error?.message ?? parsed.error ?? `HTTP ${status}`;
+    if (typeof message === 'object') {
+      message = JSON.stringify(message);
+    }
+
+    return message;
+  }
+
+  /** Parses one `data: {...}` SSE event block. Returns null for keep-alives and `[DONE]`. */
+  private static parseSseEvent(rawEvent: string): Record<string, any> | null {
+    const dataLines = rawEvent
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trim());
+
+    if (dataLines.length === 0) {
+      return null;
+    }
+
+    const payload = dataLines.join('');
+    if (payload === '[DONE]') {
+      return null;
+    }
+
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  }
+
+  private static applyStreamEvent(
+    event: Record<string, any>,
+    accumulators: Map<number, StreamChoiceAccumulator>,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): void {
+    const choices = Array.isArray(event.choices) ? event.choices : [];
+
+    for (const choice of choices) {
+      const index = Number(choice.index ?? 0);
+      let acc = accumulators.get(index);
+      if (!acc) {
+        acc = { role: 'assistant', content: '', reasoning: '', toolCalls: new Map(), finishReason: null };
+        accumulators.set(index, acc);
+      }
+
+      const delta = choice.delta ?? {};
+      if (typeof delta.role === 'string') {
+        acc.role = delta.role;
+      }
+
+      const contentDelta: string = typeof delta.content === 'string' ? delta.content : '';
+      const reasoningDelta: string | null = typeof delta.reasoning_content === 'string' ? delta.reasoning_content : null;
+      acc.content += contentDelta;
+      if (reasoningDelta) {
+        acc.reasoning += reasoningDelta;
+      }
+
+      let toolCallDeltas: ToolCallDelta[] | null = null;
+      if (Array.isArray(delta.tool_calls)) {
+        const parsedToolCallDeltas: ToolCallDelta[] = delta.tool_calls.map((raw: any) => ToolCallDelta.fromApiShape(raw));
+        toolCallDeltas = parsedToolCallDeltas;
+        for (const toolCallDelta of parsedToolCallDeltas) {
+          let call = acc.toolCalls.get(toolCallDelta.index);
+          if (!call) {
+            call = { id: '', name: '', argumentsJson: '' };
+            acc.toolCalls.set(toolCallDelta.index, call);
+          }
+          if (toolCallDelta.id) {
+            call.id = toolCallDelta.id;
+          }
+          if (toolCallDelta.name) {
+            call.name = toolCallDelta.name;
+          }
+          if (toolCallDelta.argumentsJson) {
+            call.argumentsJson += toolCallDelta.argumentsJson;
+          }
+        }
+      }
+
+      const finishReason: string | null = typeof choice.finish_reason === 'string' ? choice.finish_reason : null;
+      if (finishReason) {
+        acc.finishReason = finishReason;
+      }
+
+      if (contentDelta || reasoningDelta || toolCallDeltas || finishReason) {
+        onChunk(new ChatCompletionChunk(index, contentDelta, reasoningDelta, toolCallDeltas, finishReason));
+      }
+    }
   }
 
   private static parseEmbeddingVector(value: unknown): number[] {

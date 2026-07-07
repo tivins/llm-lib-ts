@@ -30,6 +30,10 @@ class StubLLM implements LLMClient {
     return response;
   }
 
+  async chatCompletionStream(): Promise<ChatCompletionResponse> {
+    throw new Error('not implemented');
+  }
+
   async tokenize(): Promise<number[]> {
     return [];
   }

@@ -13,6 +13,8 @@ export type { UsageApiShape } from './Usage';
 export { Choice } from './Choice';
 export { ChatCompletionOptions } from './ChatCompletionOptions';
 export { ChatCompletionResponse } from './ChatCompletionResponse';
+export { ChatCompletionChunk } from './ChatCompletionChunk';
+export { ToolCallDelta } from './ToolCallDelta';
 export { Embedding } from './Embedding';
 export { EmbeddingOptions } from './EmbeddingOptions';
 export { EmbeddingResponse } from './EmbeddingResponse';

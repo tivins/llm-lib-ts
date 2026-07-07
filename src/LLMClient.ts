@@ -1,3 +1,4 @@
+import type { ChatCompletionChunk } from './ChatCompletionChunk';
 import type { ChatCompletionOptions } from './ChatCompletionOptions';
 import type { ChatCompletionResponse } from './ChatCompletionResponse';
 import type { Conversation } from './Conversation';
@@ -10,6 +11,11 @@ import type { RerankResponse } from './RerankResponse';
 export interface LLMClient {
   tokenize(text: string): Promise<number[]>;
   chatCompletion(conversation: Conversation, options: ChatCompletionOptions): Promise<ChatCompletionResponse>;
+  chatCompletionStream(
+    conversation: Conversation,
+    options: ChatCompletionOptions,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): Promise<ChatCompletionResponse>;
   embeddings(input: string | string[], options?: EmbeddingOptions): Promise<EmbeddingResponse>;
   rerank(query: string, documents: string[], options?: RerankOptions): Promise<RerankResponse>;
 }
