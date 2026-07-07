@@ -331,6 +331,29 @@ describe('LLM.tokenize', () => {
   });
 });
 
+describe('LLM.contextSize', () => {
+  test('reads n_ctx from default_generation_settings', async () => {
+    const captured: { url?: string; init?: RequestInit } = {};
+    stubFetch(jsonResponse(200, { default_generation_settings: { n_ctx: 4096 } }), captured);
+
+    const llm = new LLM('http://localhost:8080');
+    const size = await llm.contextSize();
+
+    expect(size).toBe(4096);
+    expect(captured.url).toBe('http://localhost:8080/props');
+    expect(captured.init?.method).toBe('GET');
+  });
+
+  test('throws when n_ctx is missing', async () => {
+    stubFetch(jsonResponse(200, { default_generation_settings: {} }));
+
+    const llm = new LLM('http://localhost:8080');
+    await expect(llm.contextSize()).rejects.toThrow(
+      'LLM props response missing default_generation_settings.n_ctx',
+    );
+  });
+});
+
 describe('LLM.embeddings', () => {
   test('parses plain numeric embedding vectors', async () => {
     stubFetch(

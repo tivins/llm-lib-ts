@@ -38,6 +38,10 @@ class StubLLM implements LLMClient {
     return [];
   }
 
+  async contextSize(): Promise<number> {
+    throw new Error('not implemented');
+  }
+
   async embeddings(): Promise<any> {
     throw new Error('not implemented');
   }

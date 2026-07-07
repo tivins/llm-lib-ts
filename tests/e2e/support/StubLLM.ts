@@ -37,6 +37,10 @@ export class StubLLM implements LLMClient {
     throw new Error('StubLLM: tokenize not implemented');
   }
 
+  async contextSize(): Promise<number> {
+    throw new Error('StubLLM: contextSize not implemented');
+  }
+
   async embeddings(): Promise<EmbeddingResponse> {
     throw new Error('StubLLM: embeddings not implemented');
   }

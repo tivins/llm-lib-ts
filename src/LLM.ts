@@ -51,6 +51,21 @@ export class LLM implements LLMClient {
     );
   }
 
+  /**
+   * Returns the usable context size (in tokens) the server is currently configured with,
+   * via llama.cpp's `GET /props` (`default_generation_settings.n_ctx`).
+   */
+  async contextSize(): Promise<number> {
+    const data = await this.request('GET', '/props');
+    const nCtx = data.default_generation_settings?.n_ctx;
+
+    if (typeof nCtx !== 'number') {
+      throw new Error('LLM props response missing default_generation_settings.n_ctx');
+    }
+
+    return nCtx;
+  }
+
   async chatCompletion(conversation: Conversation, options: ChatCompletionOptions): Promise<ChatCompletionResponse> {
     const start = performance.now();
     const body = JSON.stringify({
