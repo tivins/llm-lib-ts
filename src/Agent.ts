@@ -94,7 +94,11 @@ export class Agent {
     }
 
     const finishReason = response.finishReason();
-    if (finishReason === 'stop' || (finishReason === 'length' && !response.hasToolCalls())) {
+    if (
+      finishReason === 'stop' ||
+      finishReason === 'aborted' ||
+      (finishReason === 'length' && !response.hasToolCalls())
+    ) {
       let stored = this.toStoredAssistantMessage(response, options);
       if (stored) {
         stored = this.applyAssistantResponseHooks(stored);

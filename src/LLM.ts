@@ -144,73 +144,82 @@ export class LLM implements LLMClient {
       headers.Authorization = `Bearer ${this.apiKey}`;
     }
 
-    let response: Response;
-    try {
-      response = await fetch(this.endpoint + '/v1/chat/completions', {
-        method: 'POST',
-        headers,
-        body,
-        signal: AbortSignal.timeout(this.timeoutSeconds * 1000),
-      });
-    } catch (e) {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    }
-
-    if (response.status >= 400) {
-      const text = await response.text();
-      throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
-    }
-    if (!response.body) {
-      throw new Error('LLM streaming response has no body');
-    }
+    const timeoutSignal = AbortSignal.timeout(this.timeoutSeconds * 1000);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
 
     const accumulators = new Map<number, StreamChoiceAccumulator>();
     let usage = new Usage(0, 0, 0);
     let model = this.defaultModel ?? 'unknown';
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-
-        let separatorIndex: number;
-        while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
-          const rawEvent = buffer.slice(0, separatorIndex);
-          buffer = buffer.slice(separatorIndex + 2);
-
-          const event = LLM.parseSseEvent(rawEvent);
-          if (!event) {
-            continue;
-          }
-          if (typeof event.model === 'string') {
-            model = event.model;
-          }
-          if (event.usage) {
-            usage = new Usage(
-              event.usage.prompt_tokens ?? 0,
-              event.usage.completion_tokens ?? 0,
-              event.usage.total_tokens ?? 0,
-            );
-          }
-          LLM.applyStreamEvent(event, accumulators, onChunk);
-        }
+      let response: Response;
+      try {
+        response = await fetch(this.endpoint + '/v1/chat/completions', { method: 'POST', headers, body, signal });
+      } catch (e) {
+        throw new Error(e instanceof Error ? e.message : String(e));
       }
-    } finally {
-      reader.releaseLock();
+
+      if (response.status >= 400) {
+        const text = await response.text();
+        throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
+      }
+      if (!response.body) {
+        throw new Error('LLM streaming response has no body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+
+          let separatorIndex: number;
+          while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
+            const rawEvent = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+
+            const event = LLM.parseSseEvent(rawEvent);
+            if (!event) {
+              continue;
+            }
+            if (typeof event.model === 'string') {
+              model = event.model;
+            }
+            if (event.usage) {
+              usage = new Usage(
+                event.usage.prompt_tokens ?? 0,
+                event.usage.completion_tokens ?? 0,
+                event.usage.total_tokens ?? 0,
+              );
+            }
+            LLM.applyStreamEvent(event, accumulators, onChunk);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (e) {
+      // Only a caller-initiated abort (options.signal) degrades gracefully into a partial
+      // response; a fetch timeout or genuine network error still propagates as before.
+      if (!options.signal?.aborted) {
+        throw e;
+      }
     }
+
+    const aborted = options.signal?.aborted ?? false;
 
     const choices = Array.from(accumulators.entries())
       .sort(([a], [b]) => a - b)
       .map(([index, acc]) => {
+        // Drop any in-flight tool call: its arguments JSON may be truncated mid-abort and unsafe to execute.
         const toolCalls =
-          acc.toolCalls.size > 0
+          !aborted && acc.toolCalls.size > 0
             ? Array.from(acc.toolCalls.values()).map((call) => new ToolCall(call.id, call.name, call.argumentsJson))
             : null;
         const [content, reasoningContent] = LLM.normalizeAssistantContent(acc.content, acc.reasoning || null);
@@ -224,7 +233,7 @@ export class LLM implements LLMClient {
             {},
             toolCalls,
           ),
-          acc.finishReason ?? 'stop',
+          aborted ? 'aborted' : (acc.finishReason ?? 'stop'),
         );
       });
 

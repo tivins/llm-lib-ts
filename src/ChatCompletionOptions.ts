@@ -10,6 +10,7 @@ export class ChatCompletionOptions {
     public tools?: ToolRegistry,
     public toolChoice?: string,
     public responseFormat?: string,
+    public signal?: AbortSignal,
   ) {}
 
   clone(): ChatCompletionOptions {
@@ -21,6 +22,7 @@ export class ChatCompletionOptions {
       this.tools,
       this.toolChoice,
       this.responseFormat,
+      this.signal,
     );
   }
 
