@@ -25,6 +25,8 @@ export type { RankedDocument } from './RerankResponse';
 export * as HarmonyContent from './HarmonyContent';
 export type { LLMClient } from './LLMClient';
 export { LLM } from './LLM';
+export { LLMRequestError } from './LLMRequestError';
+export type { LLMRequestErrorOptions } from './LLMRequestError';
 export { Conversation } from './Conversation';
 export { Logger } from './Logger';
 export { AgentHookEvent } from './AgentHookEvent';

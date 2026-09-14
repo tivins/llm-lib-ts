@@ -3,6 +3,7 @@ import { ChatCompletionOptions } from '../src/ChatCompletionOptions';
 import { Conversation } from '../src/Conversation';
 import { EmbeddingOptions } from '../src/EmbeddingOptions';
 import { LLM } from '../src/LLM';
+import { LLMRequestError } from '../src/LLMRequestError';
 import { Message } from '../src/Message';
 import { RerankOptions } from '../src/RerankOptions';
 import { Role } from '../src/Role';
@@ -187,6 +188,58 @@ describe('LLM.chatCompletion', () => {
     );
   });
 
+  test('throws an LLMRequestError with structured fields for an OpenRouter-shaped 429', async () => {
+    const raw =
+      'google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations';
+    stubFetch(
+      jsonResponse(429, {
+        error: {
+          message: 'Provider returned error',
+          code: 429,
+          metadata: {
+            raw,
+            provider_name: 'Google AI Studio',
+            is_byok: false,
+            provider_error_code: '429',
+            limit_source: 'upstream_provider_shared_pool',
+          },
+        },
+        user_id: 'user_123',
+      }),
+    );
+
+    const llm = new LLM('http://localhost:8080');
+    let caught: unknown;
+    try {
+      await llm.chatCompletion(new Conversation(), new ChatCompletionOptions());
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(LLMRequestError);
+    const error = caught as LLMRequestError;
+    expect(error.status).toBe(429);
+    expect(error.providerMessage).toBe('Provider returned error');
+    expect(error.code).toBe(429);
+    expect(error.providerName).toBe('Google AI Studio');
+    expect(error.metadata?.raw).toBe(raw);
+    expect(error.message).toContain('429');
+    expect(error.message).toContain('temporarily rate-limited upstream');
+    expect(error.message).toContain('LLM request failed: Provider returned error');
+  });
+
+  test('truncates a long metadata.raw in the message but keeps it whole in metadata', () => {
+    const raw = 'x'.repeat(1000);
+    const error = LLMRequestError.fromResponseBody(
+      JSON.stringify({ error: { message: 'Provider returned error', metadata: { raw } } }),
+      502,
+    );
+
+    expect(error.metadata?.raw).toBe(raw);
+    expect(error.message).toContain(`— ${'x'.repeat(200)}…`);
+    expect(error.message).not.toContain('x'.repeat(201));
+  });
+
   test('sends an Authorization header when an apiKey is configured', async () => {
     const captured: { url?: string; init?: RequestInit } = {};
     stubFetch(
@@ -310,6 +363,41 @@ describe('LLM.chatCompletionStream', () => {
     await expect(
       llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {}),
     ).rejects.toThrow('LLM request failed: boom');
+  });
+
+  test('throws the same LLMRequestError shape as chatCompletion on an HTTP error status', async () => {
+    stubFetch(jsonResponse(429, { error: { message: 'Provider returned error', code: 429 } }));
+
+    const llm = new LLM('http://localhost:8080');
+    let caught: unknown;
+    try {
+      await llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {});
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(LLMRequestError);
+    const error = caught as LLMRequestError;
+    expect(error.status).toBe(429);
+    expect(error.providerMessage).toBe('Provider returned error');
+    expect(error.code).toBe(429);
+  });
+
+  test('falls back to an HTTP-status message for a non-JSON error body', async () => {
+    stubFetch(textResponse(503, 'upstream unavailable'));
+
+    const llm = new LLM('http://localhost:8080');
+    let caught: unknown;
+    try {
+      await llm.chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {});
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(LLMRequestError);
+    const error = caught as LLMRequestError;
+    expect(error.status).toBe(503);
+    expect(error.providerMessage).toBe('HTTP 503');
   });
 });
 

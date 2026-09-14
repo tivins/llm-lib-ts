@@ -8,6 +8,7 @@ import { EmbeddingOptions } from './EmbeddingOptions';
 import { EmbeddingResponse } from './EmbeddingResponse';
 import * as HarmonyContent from './HarmonyContent';
 import type { LLMClient } from './LLMClient';
+import { LLMRequestError } from './LLMRequestError';
 import { Message } from './Message';
 import { RerankOptions } from './RerankOptions';
 import { RerankResponse } from './RerankResponse';
@@ -161,7 +162,7 @@ export class LLM implements LLMClient {
 
       if (response.status >= 400) {
         const text = await response.text();
-        throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
+        throw LLMRequestError.fromResponseBody(text, response.status);
       }
       if (!response.body) {
         throw new Error('LLM streaming response has no body');
@@ -353,30 +354,10 @@ export class LLM implements LLMClient {
 
     const parsed = data as Record<string, any>;
     if (response.status >= 400 || parsed.error !== undefined) {
-      throw new Error(`LLM request failed: ${LLM.extractErrorMessage(text, response.status)}`);
+      throw LLMRequestError.fromResponseBody(text, response.status);
     }
 
     return parsed;
-  }
-
-  private static extractErrorMessage(text: string, status: number): string {
-    let data: unknown;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return `HTTP ${status}`;
-    }
-    if (typeof data !== 'object' || data === null) {
-      return `HTTP ${status}`;
-    }
-
-    const parsed = data as Record<string, any>;
-    let message = parsed.error?.message ?? parsed.error ?? `HTTP ${status}`;
-    if (typeof message === 'object') {
-      message = JSON.stringify(message);
-    }
-
-    return message;
   }
 
   /** Parses one `data: {...}` SSE event block. Returns null for keep-alives and `[DONE]`. */
@@ -509,13 +490,11 @@ export class LLM implements LLMClient {
    * autoparser fails on the raw output. Recover when the error embeds parseable text.
    */
   private tryRecoverHarmonyParseError(e: unknown): Record<string, unknown> | null {
-    const prefix = 'LLM request failed: ';
-    const message = e instanceof Error ? e.message : String(e);
-    if (!message.startsWith(prefix)) {
+    if (!(e instanceof LLMRequestError)) {
       return null;
     }
 
-    const parsed = HarmonyContent.tryParseServerError(message.slice(prefix.length));
+    const parsed = HarmonyContent.tryParseServerError(e.providerMessage);
     if (!parsed || parsed.content === '') {
       return null;
     }
