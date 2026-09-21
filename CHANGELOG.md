@@ -6,6 +6,9 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Added
+- `Agent.runTurnStream` : même boucle d'outils que `runTurn`, via `chatCompletionStream`.
+- Exemple minimal dans `examples/minimal.ts`.
 
 ## [0.3.0] - 2026-09-14
 ### Added

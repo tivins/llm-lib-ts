@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Agent } from '../src/Agent';
 import { AgentHookEvent } from '../src/AgentHookEvent';
 import { AgentHooks } from '../src/AgentHooks';
+import { ChatCompletionChunk } from '../src/ChatCompletionChunk';
 import { ChatCompletionOptions } from '../src/ChatCompletionOptions';
 import { ChatCompletionResponse } from '../src/ChatCompletionResponse';
 import { Choice } from '../src/Choice';
@@ -21,6 +22,7 @@ function makeResponse(message: Message, finishReason: string): ChatCompletionRes
 
 class StubLLM implements LLMClient {
   public calls = 0;
+  public streamCalls = 0;
 
   constructor(private responses: ChatCompletionResponse[]) {}
 
@@ -30,8 +32,20 @@ class StubLLM implements LLMClient {
     return response;
   }
 
-  async chatCompletionStream(): Promise<ChatCompletionResponse> {
-    throw new Error('not implemented');
+  async chatCompletionStream(
+    _conversation: Conversation,
+    _options: ChatCompletionOptions,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): Promise<ChatCompletionResponse> {
+    this.streamCalls++;
+    const response = await this.chatCompletion();
+    const message = response.assistantMessage();
+    if (message) {
+      onChunk(
+        new ChatCompletionChunk(0, message.content, message.reasoningContent, null, response.finishReason() ?? null),
+      );
+    }
+    return response;
   }
 
   async tokenize(): Promise<number[]> {
@@ -64,6 +78,7 @@ describe('Agent.runTurn', () => {
     expect(result.message?.content).toBe('Hello there.');
     expect(result.toolRounds).toBe(0);
     expect(conversation.messages).toHaveLength(1);
+    expect(llm.streamCalls).toBe(0);
   });
 
   test('executes a tool call round then returns the final assistant message', async () => {
@@ -187,5 +202,48 @@ describe('Agent.runTurn', () => {
 
     expect(result.success).toBe(true);
     expect(conversation.messages[1].content).toBe('replaced');
+  });
+});
+
+describe('Agent.runTurnStream', () => {
+  test('streams the assistant reply and does not call chatCompletion', async () => {
+    const llm = new StubLLM([makeResponse(new Message(Role.Assistant, 'Hello there.'), 'stop')]);
+    const agent = new Agent(llm, new ToolRegistry());
+    const deltas: string[] = [];
+
+    const result = await agent.runTurnStream(new Conversation(), new ChatCompletionOptions(), (chunk) => {
+      deltas.push(chunk.delta);
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.message?.content).toBe('Hello there.');
+    expect(llm.streamCalls).toBe(1);
+    expect(llm.calls).toBe(1);
+    expect(deltas).toEqual(['Hello there.']);
+  });
+
+  test('executes a tool call round over the stream then returns the final message', async () => {
+    const toolCall = new ToolCall('call_1', 'echo', JSON.stringify({ text: 'hi' }));
+    const assistantWithToolCall = new Message(Role.Assistant, '', null, {}, [toolCall]);
+    const finalMessage = new Message(Role.Assistant, 'Done.');
+    const llm = new StubLLM([makeResponse(assistantWithToolCall, 'tool_calls'), makeResponse(finalMessage, 'stop')]);
+
+    const tools = new ToolRegistry(new Tool(
+      { name: 'echo', description: '', parameters: {}, toApiShape: () => ({ type: 'function', function: { name: 'echo', description: '', parameters: {} } }) } as any,
+      async (args: string) => `echo:${args}`,
+    ));
+    const agent = new Agent(llm, tools);
+    const conversation = new Conversation();
+    const deltas: string[] = [];
+
+    const result = await agent.runTurnStream(conversation, new ChatCompletionOptions(), (chunk) => {
+      deltas.push(chunk.delta);
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.toolRounds).toBe(1);
+    expect(conversation.messages).toHaveLength(3);
+    expect(llm.streamCalls).toBe(2);
+    expect(deltas).toEqual(['', 'Done.']);
   });
 });
