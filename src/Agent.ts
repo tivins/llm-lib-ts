@@ -1,6 +1,7 @@
 import { AgentHooks } from './AgentHooks';
 import { AgentHookEvent } from './AgentHookEvent';
 import { AgentTurnResult } from './AgentTurnResult';
+import type { ChatCompletionChunk } from './ChatCompletionChunk';
 import type { ChatCompletionOptions } from './ChatCompletionOptions';
 import type { ChatCompletionResponse } from './ChatCompletionResponse';
 import type { Conversation } from './Conversation';
@@ -20,6 +21,23 @@ export class Agent {
   ) {}
 
   async runTurn(conversation: Conversation, options: ChatCompletionOptions): Promise<AgentTurnResult> {
+    return this.executeTurn(conversation, options);
+  }
+
+  /** Same as `runTurn`, streaming each LLM call through `onChunk`. */
+  async runTurnStream(
+    conversation: Conversation,
+    options: ChatCompletionOptions,
+    onChunk: (chunk: ChatCompletionChunk) => void,
+  ): Promise<AgentTurnResult> {
+    return this.executeTurn(conversation, options, onChunk);
+  }
+
+  private async executeTurn(
+    conversation: Conversation,
+    options: ChatCompletionOptions,
+    onChunk?: (chunk: ChatCompletionChunk) => void,
+  ): Promise<AgentTurnResult> {
     if (options.tools !== undefined && options.tools !== this.tools) {
       throw new Error('ChatCompletionOptions.tools must be the same registry as Agent.tools, or omitted.');
     }
@@ -28,15 +46,19 @@ export class Agent {
 
     this.hooks.dispatch(AgentHookEvent.BeforeTurn, { conversation, options: turnOptions });
 
-    const result = await this.runTurnInner(conversation, turnOptions);
+    const result = await this.runTurnInner(conversation, turnOptions, onChunk);
 
     this.hooks.dispatch(AgentHookEvent.AfterTurn, { conversation, options: turnOptions, result });
 
     return result;
   }
 
-  private async runTurnInner(conversation: Conversation, options: ChatCompletionOptions): Promise<AgentTurnResult> {
-    let response = await this.callLlm(conversation, options, 0);
+  private async runTurnInner(
+    conversation: Conversation,
+    options: ChatCompletionOptions,
+    onChunk?: (chunk: ChatCompletionChunk) => void,
+  ): Promise<AgentTurnResult> {
+    let response = await this.callLlm(conversation, options, 0, onChunk);
     let toolRounds = 0;
 
     while (response.hasToolCalls()) {
@@ -90,7 +112,7 @@ export class Agent {
       this.hooks.dispatch(AgentHookEvent.AfterToolRound, { conversation, toolMessages, toolRound: toolRounds });
 
       toolRounds++;
-      response = await this.callLlm(conversation, options, toolRounds);
+      response = await this.callLlm(conversation, options, toolRounds, onChunk);
     }
 
     const finishReason = response.finishReason();
@@ -125,10 +147,13 @@ export class Agent {
     conversation: Conversation,
     options: ChatCompletionOptions,
     toolRound: number,
+    onChunk?: (chunk: ChatCompletionChunk) => void,
   ): Promise<ChatCompletionResponse> {
     this.hooks.dispatch(AgentHookEvent.BeforeLlmCall, { conversation, options, toolRound });
 
-    const response = await this.llm.chatCompletion(conversation, options);
+    const response = onChunk
+      ? await this.llm.chatCompletionStream(conversation, options, onChunk)
+      : await this.llm.chatCompletion(conversation, options);
 
     this.hooks.dispatch(AgentHookEvent.AfterLlmCall, { conversation, options, toolRound, response });
 
