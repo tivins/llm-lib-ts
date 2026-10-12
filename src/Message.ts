@@ -1,8 +1,9 @@
+import type { Attachment } from './Attachment';
 import { Role } from './Role';
 import type { ToolCall } from './ToolCall';
 import * as HarmonyContent from './HarmonyContent';
 
-/** A single chat message with role, content, metadata, and optional tool calls. */
+/** A single chat message with role, content, metadata, optional tool calls, and optional media attachments. */
 export class Message {
   constructor(
     public role: Role,
@@ -11,7 +12,13 @@ export class Message {
     public meta: Record<string, unknown> = {},
     public toolCalls: ToolCall[] | null = null,
     public toolCallId: string | null = null,
+    public attachments: Attachment[] = [],
   ) {}
+
+  /** User message with optional image/video attachments. */
+  static user(content: string, attachments: Attachment[] = []): Message {
+    return new Message(Role.User, content, null, {}, null, null, attachments);
+  }
 
   static withCreatedAt(
     role: Role,
@@ -38,6 +45,9 @@ export class Message {
     if (this.toolCallId !== null) {
       payload.tool_call_id = this.toolCallId;
     }
+    if (this.attachments.length > 0) {
+      payload.attachments = this.attachments.map((attachment) => attachment.toJSON());
+    }
     if (Object.keys(this.meta).length > 0) {
       payload.meta = this.meta;
     }
@@ -53,7 +63,7 @@ export class Message {
 
     const payload: Record<string, unknown> = {
       role: this.role,
-      content: content === '' ? null : content,
+      content: this.attachments.length > 0 ? this.toContentParts(content) : content === '' ? null : content,
     };
     // reasoning_content is intentionally omitted here: it is internal chain-of-thought
     // produced by the model and must not be re-injected into subsequent requests
@@ -67,5 +77,17 @@ export class Message {
     }
 
     return payload;
+  }
+
+  private toContentParts(text: string): Record<string, unknown>[] {
+    const parts: Record<string, unknown>[] = [];
+    if (text !== '') {
+      parts.push({ type: 'text', text });
+    }
+    for (const attachment of this.attachments) {
+      parts.push(attachment.toContentPart());
+    }
+
+    return parts;
   }
 }

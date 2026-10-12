@@ -1,6 +1,6 @@
 # llm-lib-ts
 
-TypeScript (ESM) client for **OpenAI-compatible** endpoints: chat, streaming, agent + tools, embeddings, rerank.
+TypeScript (ESM) client for **OpenAI-compatible** endpoints: chat, streaming, images & video, agent + tools, embeddings, rerank.
 
 Built for [llama.cpp](https://github.com/ggml-org/llama.cpp); also works with OpenAI / OpenRouter.
 
@@ -78,6 +78,26 @@ options.signal = ac.signal;
 ```
 
 In-flight tool calls are **dropped** on abort (arguments JSON may be truncated).
+
+### Images and video
+
+Attach media to a **user** message (llama.cpp needs a model loaded with its `mmproj`):
+
+```ts
+import { Attachment, Message } from "llm-lib-ts";
+
+const image = await Attachment.fromFile("./photo.png");         // MIME inferred from the extension
+const clip = Attachment.fromBytes(bytes, "video/mp4", "clip.mp4"); // or Attachment.fromBase64(b64, mime)
+
+conversation.addMessage(Message.user("What happens in this clip?", [image, clip]));
+```
+
+Accepted types: `image/*` and `video/*` (anything else throws). Media is sent inline as base64 data URLs: the text becomes a `{ type: "text" }` part, followed by an `image_url` / `video_url` part per attachment. A message without attachments is sent exactly as before.
+
+- Attachments are re-sent with the history on **every** turn: watch the context size.
+- `Logger` / `toJSON()` record only `kind`, `mime_type`, `size` and `name`, never the bytes.
+
+Example: [`examples/multimodalExample.ts`](examples/multimodalExample.ts).
 
 ### Options (`ChatCompletionOptions`)
 
@@ -220,7 +240,8 @@ llama.cpp + Harmony (GPT-OSS): if the server fails after generation, the client 
 |---|---|
 | `LLM` / `LLMClient` | HTTP transport |
 | `Conversation` | ordered list of `Message` |
-| `Message` | `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`, `meta` |
+| `Message` | `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`, `meta`, `attachments` |
+| `Attachment` | image / video bytes + MIME type |
 | `Role` | `system` · `assistant` · `user` · `tool` |
 | `ChatCompletionResponse` | choices, usage, helpers |
 | `Agent` / `AgentTurnResult` | tool loop |

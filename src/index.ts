@@ -1,5 +1,7 @@
 export { Role } from './Role';
 export { Message } from './Message';
+export { Attachment } from './Attachment';
+export type { AttachmentKind } from './Attachment';
 export { ToolCall } from './ToolCall';
 export type { ToolCallApiShape } from './ToolCall';
 export { ToolSchema } from './ToolSchema';

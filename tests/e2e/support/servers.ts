@@ -16,3 +16,16 @@ async function isUp(endpoint: string): Promise<boolean> {
 export const CHAT_UP = await isUp(CHAT_ENDPOINT);
 export const EMBED_UP = await isUp(EMBED_ENDPOINT);
 export const RERANK_UP = await isUp(RERANK_ENDPOINT);
+
+async function chatModalities(endpoint: string): Promise<{ vision: boolean; video: boolean }> {
+  try {
+    const response = await fetch(`${endpoint}/props`, { signal: AbortSignal.timeout(2000) });
+    const props = (await response.json()) as { modalities?: { vision?: boolean; video?: boolean } };
+    return { vision: props.modalities?.vision === true, video: props.modalities?.video === true };
+  } catch {
+    return { vision: false, video: false };
+  }
+}
+
+/** Modalities advertised by the chat server's /props (llama.cpp with an mmproj loaded). */
+export const CHAT_MODALITIES = CHAT_UP ? await chatModalities(CHAT_ENDPOINT) : { vision: false, video: false };
