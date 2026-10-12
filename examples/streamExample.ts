@@ -3,6 +3,11 @@ import * as readline from "node:readline/promises";
 import {stdin as input, stdout as output} from "node:process";
 import {appendFile, readFile} from "node:fs/promises";
 
+const PROVIDER_URL = process.env.PROVIDER_URL ?? 'http://127.0.0.1:8080';
+const API_KEY = process.env.API_KEY ?? undefined;
+const LLM_MODEL = process.env.LLM_MODEL ?? undefined;
+const LLM_TIMEOUT = Number.parseInt(process.env.LLM_TIMEOUT ?? "300");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Petite palette 256 couleurs + helpers de style
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,12 +38,13 @@ const line = (s = "") => write(s === "" ? `${GUTTER_EMPTY}\n` : `${GUTTER}${s}\n
 const contentWidth = () =>
     Math.min(96, Math.max(40, (process.stdout.columns ?? 80) - 4));
 
-const reasoningSeparator = "\n\n---\n\n";
+const THOUGHT_OPEN = "<thought>";
+const THOUGHT_CLOSE = "</thought>";
 const systemPromptFormat = `[FORMAT_INSTRUCTION] : Tu dois impérativement répondre en respectant strictement la structure suivante :
 
-\`\`\`
-{résumé_concis_du_raisonnement}${reasoningSeparator}{ta_réponse_directe}
-\`\`\`
+${THOUGHT_OPEN}{résumé_concis_du_raisonnement}${THOUGHT_CLOSE}{ta_réponse_directe}
+
+Règles : commence directement par ${THOUGHT_OPEN}, sans texte ni bloc de code (pas de \`\`\`) autour de la réponse, et ferme ${THOUGHT_CLOSE} avant d'écrire la réponse.
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,30 +176,51 @@ function footer(result: {duration: number | null; usage: {promptTokens: number; 
 // spinner à l'arrivée du premier token et referme proprement le bloc courant.
 // ─────────────────────────────────────────────────────────────────────────────
 
+type Phase = "idle" | "reasoning" | "summary" | "answer";
+
+const PHASES: Record<Exclude<Phase, "idle">, {title: string; titleColor: string; style: string}> = {
+    reasoning: {title: "raisonnement", titleColor: CYAN, style: REASONING},
+    summary: {title: "résumé", titleColor: CYAN, style: REASONING},
+    answer: {title: "réponse", titleColor: ACCENT, style: ANSWER},
+};
+
+/** Longueur du plus long suffixe de `s` qui est un début (strict) de `tag`. */
+function partialTagLength(s: string, tag: string): number {
+    for (let n = Math.min(s.length, tag.length - 1); n > 0; n--) {
+        if (tag.startsWith(s.slice(-n))) return n;
+    }
+    return 0;
+}
+
 class StreamRenderer {
-    private phase: "idle" | "reasoning" | "answer" = "idle";
-    private reasoning: GutterWriter | null = null;
-    private answer: GutterWriter | null = null;
+    private phase: Phase = "idle";
+    private writer: GutterWriter | null = null;
     private text = "";
+
+    // Analyse de `<thought>résumé</thought>réponse`, balises possiblement coupées entre deux deltas.
+    private parse: "start" | "thought" | "answer" = "start";
+    private pending = "";
+    private trimAnswer = true;
+    private fenced = false; // toute la réponse est enveloppée dans un bloc ``` (erreur de format du modèle)
 
     constructor(private readonly spinner: Spinner) {}
 
     /** À passer tel quel à `chatCompletionStream` (le `this` est déjà lié). */
     readonly onChunk = (chunk: ChatCompletionChunk): void => {
         if (chunk.reasoningDelta) {
-            this.enter("reasoning");
-            this.reasoning!.write(chunk.reasoningDelta);
+            this.emit("reasoning", chunk.reasoningDelta);
         }
         if (chunk.delta) {
-            this.enter("answer");
             this.text += chunk.delta;
-            this.answer!.write(chunk.delta);
+            this.pending += chunk.delta;
+            this.drain(false);
         }
     };
 
-    /** Texte de la réponse (raisonnement exclu) reçu jusqu'ici. */
+    /** Texte de la réponse (balises comprises, raisonnement natif exclu), sans cadre ``` parasite. */
     get answerText(): string {
-        return this.text;
+        if (!this.fenced) return this.text;
+        return this.text.replace(/^\s*```[a-zA-Z]*\s*/, "").replace(/\s*`{3}\s*$/, "");
     }
 
     /** Vrai tant que rien n'a été écrit (ni raisonnement ni réponse). */
@@ -203,25 +230,76 @@ class StreamRenderer {
 
     /** Referme le bloc en cours. À appeler une fois le flux terminé ou interrompu. */
     finish(): void {
+        this.drain(true);
         this.spinner.stop();
-        if (this.phase === "answer") this.answer!.end();
-        else if (this.phase === "reasoning") this.reasoning!.end();
+        this.writer?.end();
+        this.writer = null;
     }
 
-    private enter(phase: "reasoning" | "answer"): void {
+    /** Consomme `pending` ; en fin de flux (`final`), vide aussi ce qui a été retenu. */
+    private drain(final: boolean): void {
+        while (this.pending !== "") {
+            if (this.parse === "start") {
+                const head = this.pending.trimStart();
+                const fence = head.match(/^`{3}[a-zA-Z]*\s*/);
+                if (fence && fence[0].length < head.length) {
+                    this.fenced = true; // on ignore l'ouverture du cadre
+                    this.pending = head.slice(fence[0].length);
+                } else if (!final && (fence || /^`{1,2}$/.test(head))) {
+                    return; // cadre encore incomplet : on attend la suite
+                } else if (head.startsWith(THOUGHT_OPEN)) {
+                    this.pending = head.slice(THOUGHT_OPEN.length);
+                    this.parse = "thought";
+                } else if (!final && THOUGHT_OPEN.startsWith(head)) {
+                    return; // début de balise (ou blancs seuls) : on attend la suite
+                } else {
+                    this.parse = "answer"; // pas de balise : tout est réponse
+                }
+            } else if (this.parse === "thought") {
+                const end = this.pending.indexOf(THOUGHT_CLOSE);
+                if (end !== -1) {
+                    this.emit("summary", this.pending.slice(0, end));
+                    this.pending = this.pending.slice(end + THOUGHT_CLOSE.length);
+                    this.parse = "answer";
+                } else {
+                    const keep = final ? 0 : partialTagLength(this.pending, THOUGHT_CLOSE);
+                    this.emit("summary", this.pending.slice(0, this.pending.length - keep));
+                    this.pending = this.pending.slice(this.pending.length - keep);
+                    return;
+                }
+            } else {
+                let text = this.trimAnswer ? this.pending.trimStart() : this.pending;
+                this.pending = "";
+                if (this.fenced) {
+                    // On retient la queue susceptible d'être la fermeture du cadre ; jetée en fin de flux.
+                    const tail = text.match(/\s*`{0,3}\s*$/)![0];
+                    if (!final) this.pending = tail;
+                    text = text.slice(0, text.length - tail.length);
+                }
+                if (text !== "") {
+                    this.trimAnswer = false;
+                    this.emit("answer", text);
+                }
+                if (this.pending !== "") return; // queue retenue : on attend la suite
+            }
+        }
+    }
+
+    private emit(phase: Exclude<Phase, "idle">, text: string): void {
+        if (text === "") return;
+        this.enter(phase);
+        this.writer!.write(text);
+    }
+
+    private enter(phase: Exclude<Phase, "idle">): void {
         if (this.phase === phase) return;
         this.spinner.stop();
+        this.writer?.end();
 
-        if (phase === "reasoning") {
-            sectionTitle("raisonnement", CYAN);
-            this.reasoning = new GutterWriter(REASONING);
-            this.reasoning.begin();
-        } else {
-            this.reasoning?.end();
-            sectionTitle("réponse", ACCENT);
-            this.answer = new GutterWriter(ANSWER);
-            this.answer.begin();
-        }
+        const {title, titleColor, style} = PHASES[phase];
+        sectionTitle(title, titleColor);
+        this.writer = new GutterWriter(style);
+        this.writer.begin();
         this.phase = phase;
     }
 }
@@ -241,7 +319,7 @@ async function log(role: string, content: string): Promise<void> {
     await appendFile(logFile, `[${ts}] [${role}]\n${content}\n\n`);
 }
 
-const llm = new LLM("http://localhost:8080", undefined, undefined, 300);
+const llm = new LLM(PROVIDER_URL, API_KEY, LLM_MODEL, LLM_TIMEOUT);
 
 // À récupérer avant d'ouvrir readline : tant que l'interface écoute stdin, toute
 // ligne qui arrive pendant un `await` sans `question()` actif serait perdue.
@@ -329,17 +407,8 @@ while (true) {
 
         if (renderer.answerText !== "") {
 
-            const sepIndex = renderer.answerText.indexOf(reasoningSeparator);
-            let assistantContent: string;
-            if (sepIndex !== -1) {
-                const shortReasoning = renderer.answerText.slice(0, sepIndex).trim();
-                const realAnswer = renderer.answerText.slice(sepIndex + reasoningSeparator.length).trim();
-                assistantContent = `<thought>${shortReasoning}</thought>${realAnswer}`;
-            } else {
-                assistantContent = renderer.answerText;
-            }
-            conv.addMessage(new Message(Role.Assistant, assistantContent));
-            await log("assistant", assistantContent);
+            conv.addMessage(new Message(Role.Assistant, renderer.answerText));
+            await log("assistant", renderer.answerText);
         }
     } catch (e) {
         renderer.finish();
