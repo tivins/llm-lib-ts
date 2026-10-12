@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+### Added
+- Sorties structurées : `ResponseFormat` (`text()`, `jsonObject()`, `jsonSchema(name, schema, strict)`). `ChatCompletionOptions.responseFormat` accepte un `ResponseFormat` en plus d'une string ; `jsonSchema` part au format OpenAI (`{ type: "json_schema", json_schema: { name, schema, strict } }`) et llama-server en tire une grammaire. Une string reste envoyée telle quelle sous la forme `{ type }`.
+- Tests : `tests/ResponseFormat.test.ts` (payload, `clone()`) et e2e `ex150-json-schema` (schéma strict avec `enum`, `required`, `additionalProperties: false`, `minItems`/`maxItems`, en direct et en streaming).
+
 ## [0.4.0] - 2026-10-12
 ### Added
 - `Agent.runTurnStream` : même boucle d'outils que `runTurn`, via `chatCompletionStream`.

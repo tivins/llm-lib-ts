@@ -1,6 +1,6 @@
 # llm-lib-ts
 
-TypeScript (ESM) client for **OpenAI-compatible** endpoints: chat, streaming, images & video, agent + tools, embeddings, rerank.
+TypeScript (ESM) client for **OpenAI-compatible** endpoints: chat, streaming, images & video, structured output, agent + tools, embeddings, rerank.
 
 Built for [llama.cpp](https://github.com/ggml-org/llama.cpp); also works with OpenAI / OpenRouter.
 
@@ -99,6 +99,38 @@ Accepted types: `image/*` and `video/*` (anything else throws). Media is sent in
 
 Example: [`examples/multimodalExample.ts`](examples/multimodalExample.ts).
 
+### Structured output (JSON Schema)
+
+`ResponseFormat.jsonSchema(name, schema)` sends `response_format: { type: "json_schema", json_schema: { name, schema, strict } }`. llama-server compiles the schema into a grammar: the output matches it **by construction**, even when the prompt asks for something else.
+
+```ts
+import { ChatCompletionOptions, ResponseFormat } from "llm-lib-ts";
+
+const format = ResponseFormat.jsonSchema("situation", {
+  type: "object",
+  properties: {
+    outfit: { type: "string" },
+    framing: { type: "string", enum: ["close-up", "half-body", "full-body"] },
+  },
+  required: ["outfit", "framing"],
+  additionalProperties: false,
+});
+
+const options = new ChatCompletionOptions(undefined, 0.8, 1.0, 1, undefined, undefined, format);
+const response = await llm.chatCompletion(conversation, options);
+const situation = JSON.parse(response.firstChoice()!.message.content);
+```
+
+Also `ResponseFormat.jsonObject()` (any JSON object) and `ResponseFormat.text()`. A string (`"json_object"`) is still accepted and sent as `{ type }`.
+
+Observed with llama-server b11429:
+
+- `name` and `strict` are ignored (only `json_schema.schema` is read); `name` is required by OpenAI / OpenRouter.
+- Works in streaming. With a reasoning model, the reasoning comes first and only the answer is constrained.
+- **Tools + schema in the same request fail** (HTTP 400, `failed to parse grammar`): use one or the other.
+- The schema → grammar conversion does not cover all of JSON Schema: an unanchored `pattern` (without `^…$`) is ignored with a server warning, a non-local `$ref` is an error. `enum`, `required`, `additionalProperties: false`, `minItems` / `maxItems` are honored.
+- The library does **not** validate the response against the schema.
+
 ### Options (`ChatCompletionOptions`)
 
 | Field | Default | Notes |
@@ -109,7 +141,7 @@ Example: [`examples/multimodalExample.ts`](examples/multimodalExample.ts).
 | `n` | `1` | |
 | `tools` | — | a `ToolRegistry` |
 | `toolChoice` | — | e.g. `"auto"` |
-| `responseFormat` | — | sent as `{ type }` |
+| `responseFormat` | — | a `ResponseFormat`, or a string sent as `{ type }` |
 | `signal` | — | abort (stream) |
 
 ---

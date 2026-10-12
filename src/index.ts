@@ -14,6 +14,8 @@ export { Usage } from './Usage';
 export type { UsageApiShape } from './Usage';
 export { Choice } from './Choice';
 export { ChatCompletionOptions } from './ChatCompletionOptions';
+export { ResponseFormat } from './ResponseFormat';
+export type { ResponseFormatType } from './ResponseFormat';
 export { ChatCompletionResponse } from './ChatCompletionResponse';
 export { ChatCompletionChunk } from './ChatCompletionChunk';
 export { ToolCallDelta } from './ToolCallDelta';

@@ -1,3 +1,4 @@
+import { ResponseFormat } from './ResponseFormat';
 import type { ToolRegistry } from './ToolRegistry';
 
 /** Request parameters for a chat completion (model, sampling, tools, format). */
@@ -9,7 +10,8 @@ export class ChatCompletionOptions {
     public n: number = 1,
     public tools?: ToolRegistry,
     public toolChoice?: string,
-    public responseFormat?: string,
+    /** A plain string is sent as `{ type }`; use `ResponseFormat.jsonSchema()` to constrain the output to a schema. */
+    public responseFormat?: string | ResponseFormat,
     public signal?: AbortSignal,
   ) {}
 
@@ -46,7 +48,10 @@ export class ChatCompletionOptions {
     }
 
     if (this.responseFormat !== undefined) {
-      body.response_format = { type: this.responseFormat };
+      body.response_format =
+        this.responseFormat instanceof ResponseFormat
+          ? this.responseFormat.toApiShape()
+          : { type: this.responseFormat };
     }
 
     return body;
