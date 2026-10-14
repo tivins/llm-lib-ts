@@ -20,6 +20,11 @@ export class Message {
     return new Message(Role.User, content, null, {}, null, null, attachments);
   }
 
+  /** Shortcut for system prompt message */
+  static system(content: string): Message {
+      return new Message(Role.System, content);
+  }
+
   static withCreatedAt(
     role: Role,
     content: string,

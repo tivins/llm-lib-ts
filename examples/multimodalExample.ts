@@ -5,7 +5,6 @@ import {
   Conversation,
   LLM,
   Message,
-  Role,
 } from "../src";
 
 const args = process.argv.slice(2);
@@ -19,10 +18,10 @@ if (paths.length === 0) {
 }
 
 const llm = new LLM("http://localhost:8080", undefined, undefined, 300);
-const attachments = await Promise.all(paths.map((path) => Attachment.fromFile(path)));
+const attachments = await Promise.all(paths.map(path => Attachment.fromFile(path)));
 
 const conversation = new Conversation([
-    new Message(Role.System, "You're a helpful assistant."),
+    Message.system("You're a helpful assistant."),
     Message.user(question, attachments),
 ]);
 
