@@ -56,7 +56,7 @@ describe.skipIf(!CHAT_UP)('e2e: structured JSON output via responseFormat', () =
 
     const response = await llm.chatCompletion(
       conversation,
-      new ChatCompletionOptions(undefined, 0.1, 1.0, 1, undefined, undefined, 'json_object'),
+      new ChatCompletionOptions({ temperature: 0.1, topP: 1.0, responseFormat: 'json_object' }),
     );
 
     const text = (response.firstChoice()?.message.content ?? '').trim();
@@ -109,7 +109,7 @@ describe.skipIf(!CHAT_UP)('e2e: agent unknown tool recovery + max tool rounds', 
       ),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 1.0, 1, tools, 'auto'));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 1.0, tools, toolChoice: 'auto' }));
 
     // Either the model stays within 1 tool round (success) or exceeds it (max-rounds hook fires).
     expect(result.toolRounds).toBeGreaterThanOrEqual(0);
@@ -129,7 +129,7 @@ describe.skipIf(!CHAT_UP)('e2e: reasoning_content is logged but never re-sent to
       new Message(Role.User, 'What is 2 + 2?'),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9 }));
     expect(result.success).toBe(true);
 
     const payloadMessages = conversation.toChatCompletionPayload();

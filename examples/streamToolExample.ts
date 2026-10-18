@@ -347,7 +347,7 @@ while (true) {
   conv.addMessage(new Message(Role.User, userMessage));
 
   abortController = new AbortController();
-  const options = new ChatCompletionOptions(undefined, 0.2, 0.9, 1, tools, "auto");
+  const options = new ChatCompletionOptions({ temperature: 0.2, topP: 0.9, tools, toolChoice: "auto" });
   options.signal = abortController.signal;
 
   let toolRounds = 0;

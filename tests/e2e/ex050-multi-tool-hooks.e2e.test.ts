@@ -96,7 +96,7 @@ describe.skipIf(!CHAT_UP)('e2e: multi-tool support workflow with lifecycle hooks
       ),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9, 1, tools, 'auto'));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9, tools, toolChoice: 'auto' }));
 
     expect(result.success).toBe(true);
     expect(calledTools).toContain('lookup_order');

@@ -66,7 +66,7 @@ describe.skipIf(!CHAT_UP)('e2e: advanced lifecycle hooks (mocked tool + response
       new Message(Role.User, 'Can we ship 10 units of SKU-100 today?'),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9, 1, tools, 'auto'));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9, tools, toolChoice: 'auto' }));
 
     expect(result.success).toBe(true);
     expect(mockedCallCount).toBeGreaterThanOrEqual(1);

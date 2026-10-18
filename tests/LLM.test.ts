@@ -270,7 +270,7 @@ describe('LLM.chatCompletion', () => {
 
     const llm = new LLM('http://localhost:8080');
     const conversation = new Conversation([new Message(Role.User, 'hello')]);
-    await llm.chatCompletion(conversation, new ChatCompletionOptions('my-model'));
+    await llm.chatCompletion(conversation, new ChatCompletionOptions({ model: 'my-model' }));
 
     const body = JSON.parse(captured.init?.body as string);
     expect(body.messages).toEqual([{ role: 'user', content: 'hello' }]);

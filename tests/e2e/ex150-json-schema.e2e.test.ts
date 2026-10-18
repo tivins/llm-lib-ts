@@ -26,15 +26,11 @@ function conversation(): Conversation {
 }
 
 function options(): ChatCompletionOptions {
-  return new ChatCompletionOptions(
-    undefined,
-    0.9,
-    1.0,
-    1,
-    undefined,
-    undefined,
-    ResponseFormat.jsonSchema('checklist', SCHEMA),
-  );
+  return new ChatCompletionOptions({
+    temperature: 0.9,
+    topP: 1.0,
+    responseFormat: ResponseFormat.jsonSchema('checklist', SCHEMA),
+  });
 }
 
 function expectMatchesSchema(content: string): void {

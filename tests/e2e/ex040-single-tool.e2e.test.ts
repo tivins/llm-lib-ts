@@ -67,7 +67,7 @@ describe.skipIf(!CHAT_UP)('e2e: agent calls one tool before answering', () => {
       new Message(Role.User, 'Hi, can you check order FR-2026-0042 and draft a reply I can send to the customer?'),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9, 1, tools, 'auto'));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9, tools, toolChoice: 'auto' }));
 
     expect(result.success).toBe(true);
     expect(state.handlerCalledWith).toBe('FR-2026-0042');

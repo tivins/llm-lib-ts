@@ -161,7 +161,7 @@ describe('Agent.runTurn', () => {
     const otherRegistry = new ToolRegistry();
 
     await expect(
-      agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.7, 1, 1, otherRegistry)),
+      agent.runTurn(conversation, new ChatCompletionOptions({ tools: otherRegistry })),
     ).rejects.toThrow('ChatCompletionOptions.tools must be the same registry as Agent.tools, or omitted.');
   });
 

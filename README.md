@@ -42,9 +42,9 @@ Fuller example: [`examples/minimal.ts`](examples/minimal.ts). Interactive stream
 ### Complete
 
 ```ts
-const options = new ChatCompletionOptions();
-options.temperature = 0.2;
-options.model = "my-model"; // otherwise LLM.defaultModel
+// Every field is optional: model (otherwise LLM.defaultModel), temperature (0.7),
+// topP (1.0), n (1), tools, toolChoice, responseFormat, signal.
+const options = new ChatCompletionOptions({ temperature: 0.2, model: "my-model" });
 
 const response = await llm.chatCompletion(conversation, options);
 response.assistantMessage()?.content;
@@ -116,7 +116,7 @@ const format = ResponseFormat.jsonSchema("situation", {
   additionalProperties: false,
 });
 
-const options = new ChatCompletionOptions(undefined, 0.8, 1.0, 1, undefined, undefined, format);
+const options = new ChatCompletionOptions({ temperature: 0.8, responseFormat: format });
 const response = await llm.chatCompletion(conversation, options);
 const situation = JSON.parse(response.firstChoice()!.message.content);
 ```

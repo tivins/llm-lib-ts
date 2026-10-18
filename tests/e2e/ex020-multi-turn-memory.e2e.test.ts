@@ -15,7 +15,7 @@ describe.skipIf(!CHAT_UP)('e2e: two-turn conversation with memory', () => {
       new Message(Role.User, 'Propose three simple ideas to reduce stress before a presentation.'),
     ]);
 
-    const options = new ChatCompletionOptions(undefined, 0.2, 0.9);
+    const options = new ChatCompletionOptions({ temperature: 0.2, topP: 0.9 });
 
     const firstResponse = await llm.chatCompletion(conversation, options);
     const firstMessage = firstResponse.firstChoice()?.message;

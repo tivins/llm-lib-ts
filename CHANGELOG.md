@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-18
+### Changed
+- **Cassant** : le constructeur de `ChatCompletionOptions` prend un objet `ChatCompletionOptionsInit` (exporté) au lieu de 8 arguments positionnels, par exemple `new ChatCompletionOptions({ temperature: 0.8, responseFormat: format })`. Tous les champs sont optionnels ; un champ absent ou `undefined` prend sa valeur par défaut (`temperature` 0.7, `topP` 1.0, `n` 1). `new ChatCompletionOptions()` est inchangé. Migration : `new ChatCompletionOptions(model)` devient `new ChatCompletionOptions({ model })`.
+- README et exemples passés à la nouvelle forme.
+- Tests : `tests/ChatCompletionOptions.test.ts` (valeurs par défaut, champs partiels, `undefined` explicite, `clone()`) ; tests unitaires et e2e convertis.
+
 ## [0.5.0] - 2026-10-12
 ### Added
 - Sorties structurées : `ResponseFormat` (`text()`, `jsonObject()`, `jsonSchema(name, schema, strict)`). `ChatCompletionOptions.responseFormat` accepte un `ResponseFormat` en plus d'une string ; `jsonSchema` part au format OpenAI (`{ type: "json_schema", json_schema: { name, schema, strict } }`) et llama-server en tire une grammaire. Une string reste envoyée telle quelle sous la forme `{ type }`.

@@ -15,7 +15,7 @@ describe.skipIf(!CHAT_UP)('e2e: single-turn chat completion', () => {
       new Message(Role.User, 'I need to prepare for a client meeting in 10 minutes. Give a short checklist.'),
     ]);
 
-    const response = await llm.chatCompletion(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9));
+    const response = await llm.chatCompletion(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9 }));
     const message = response.firstChoice()?.message;
 
     expect(message).toBeDefined();

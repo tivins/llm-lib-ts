@@ -18,7 +18,7 @@ describe.skipIf(!CHAT_UP)('e2e: agent turn with no tools', () => {
       new Message(Role.User, 'We are releasing a small note-taking app. Suggest a realistic manual testing plan.'),
     ]);
 
-    const result = await agent.runTurn(conversation, new ChatCompletionOptions(undefined, 0.2, 0.9));
+    const result = await agent.runTurn(conversation, new ChatCompletionOptions({ temperature: 0.2, topP: 0.9 }));
 
     expect(result.success).toBe(true);
     expect(result.message?.content.trim().length).toBeGreaterThan(0);

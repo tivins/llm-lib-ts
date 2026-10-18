@@ -16,7 +16,7 @@ async function askColor(attachment: Attachment): Promise<string> {
     Message.user(`What single color fills this ${attachment.kind}?`, [attachment]),
   ]);
 
-  const response = await llm.chatCompletion(conversation, new ChatCompletionOptions(undefined, 0.1, 0.9));
+  const response = await llm.chatCompletion(conversation, new ChatCompletionOptions({ temperature: 0.1, topP: 0.9 }));
 
   return response.assistantMessage()?.content.toLowerCase() ?? '';
 }

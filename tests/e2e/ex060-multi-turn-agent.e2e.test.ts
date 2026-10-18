@@ -12,7 +12,7 @@ describe.skipIf(!CHAT_UP)('e2e: multi-turn agent session with response metadata'
   test('reuses one agent across two user turns and reports usage metadata', async () => {
     const llm = new LLM(CHAT_ENDPOINT, undefined, undefined, 300);
     const agent = new Agent(llm, new ToolRegistry());
-    const options = new ChatCompletionOptions(undefined, 0.2, 0.9);
+    const options = new ChatCompletionOptions({ temperature: 0.2, topP: 0.9 });
 
     const conversation = new Conversation([
       new Message(Role.System, 'You are a concise assistant. Keep answers short and remember earlier turns.'),

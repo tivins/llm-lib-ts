@@ -10,7 +10,7 @@ const SCHEMA = {
 };
 
 function optionsWith(responseFormat?: string | ResponseFormat): ChatCompletionOptions {
-  return new ChatCompletionOptions(undefined, 0.7, 1.0, 1, undefined, undefined, responseFormat);
+  return new ChatCompletionOptions({ responseFormat });
 }
 
 describe('ResponseFormat', () => {
