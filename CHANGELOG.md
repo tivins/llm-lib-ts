@@ -8,6 +8,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Added
 - Exemple `examples/structuredOutputExample.ts` : réponse contrainte par un schéma JSON (`ResponseFormat.jsonSchema`), puis décodée avec `JSON.parse`. Lien depuis la section « Structured output » du README.
+- Nouvel exemple minimal `examples/streamExample.ts` : la réponse s'affiche au fil de l'eau via `chatCompletionStream`, sans le reste.
+
+### Changed
+- L'ancien `examples/streamExample.ts` (chat interactif, raisonnement, spinner, log) devient `examples/streamChatExample.ts`.
 
 ## [0.6.0] - 2026-10-18
 ### Changed

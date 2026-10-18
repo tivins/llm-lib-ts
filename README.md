@@ -31,7 +31,7 @@ const response = await llm.chatCompletion(conversation, new ChatCompletionOption
 console.log(response.assistantMessage()?.content);
 ```
 
-Fuller example: [`examples/minimal.ts`](examples/minimal.ts). Interactive streamed chat: [`examples/streamExample.ts`](examples/streamExample.ts).
+Fuller example: [`examples/minimal.ts`](examples/minimal.ts). Streaming: [`examples/streamExample.ts`](examples/streamExample.ts); interactive streamed chat: [`examples/streamChatExample.ts`](examples/streamChatExample.ts).
 
 ---
 

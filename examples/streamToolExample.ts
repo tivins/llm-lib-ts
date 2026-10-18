@@ -18,7 +18,7 @@ const LLM_MODEL = process.env.LLM_MODEL ?? undefined;
 const MAX_TOOL_ROUNDS = 5;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Palette / helpers d'affichage (même langage visuel que streamExample.ts)
+// Palette / helpers d'affichage (même langage visuel que streamChatExample.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RESET = "\x1b[0m";
