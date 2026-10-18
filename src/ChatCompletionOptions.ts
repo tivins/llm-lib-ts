@@ -11,6 +11,8 @@ export interface ChatCompletionOptionsInit {
   topP?: number;
   /** Default 1. */
   n?: number;
+  /** Sampling seed, sent only when set. Best effort: the server may still vary (batching, cache, build). */
+  seed?: number;
   tools?: ToolRegistry;
   toolChoice?: string;
   /** A plain string is sent as `{ type }`; use `ResponseFormat.jsonSchema()` to constrain the output to a schema. */
@@ -24,6 +26,7 @@ export class ChatCompletionOptions {
   temperature: number;
   topP: number;
   n: number;
+  seed?: number;
   tools?: ToolRegistry;
   toolChoice?: string;
   /** A plain string is sent as `{ type }`; use `ResponseFormat.jsonSchema()` to constrain the output to a schema. */
@@ -35,6 +38,7 @@ export class ChatCompletionOptions {
     this.temperature = init.temperature ?? 0.7;
     this.topP = init.topP ?? 1.0;
     this.n = init.n ?? 1;
+    this.seed = init.seed;
     this.tools = init.tools;
     this.toolChoice = init.toolChoice;
     this.responseFormat = init.responseFormat;
@@ -55,6 +59,10 @@ export class ChatCompletionOptions {
     const model = this.model ?? defaultModel;
     if (model !== undefined) {
       body.model = model;
+    }
+
+    if (this.seed !== undefined) {
+      body.seed = this.seed;
     }
 
     if (this.tools && this.tools.all().length > 0) {

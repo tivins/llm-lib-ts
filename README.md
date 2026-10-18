@@ -43,7 +43,7 @@ Fuller example: [`examples/minimal.ts`](examples/minimal.ts). Streaming: [`examp
 
 ```ts
 // Every field is optional: model (otherwise LLM.defaultModel), temperature (0.7),
-// topP (1.0), n (1), tools, toolChoice, responseFormat, signal.
+// topP (1.0), n (1), seed, tools, toolChoice, responseFormat, signal.
 const options = new ChatCompletionOptions({ temperature: 0.2, model: "my-model" });
 
 const response = await llm.chatCompletion(conversation, options);
@@ -141,6 +141,7 @@ Observed with llama-server b11429:
 | `temperature` | `0.7` | |
 | `topP` | `1.0` | |
 | `n` | `1` | |
+| `seed` | — | sent only when set; reproducible sampling is best effort (batching, cache and build can still change the answer) |
 | `tools` | — | a `ToolRegistry` |
 | `toolChoice` | — | e.g. `"auto"` |
 | `responseFormat` | — | a `ResponseFormat`, or a string sent as `{ type }` |

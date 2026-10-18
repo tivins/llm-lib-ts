@@ -15,6 +15,14 @@ describe('ChatCompletionOptions', () => {
     expect(options.toRequestPayload()).toEqual({ temperature: 0.2, top_p: 1.0, n: 1, model: 'my-model' });
   });
 
+  test('seed is sent only when set', () => {
+    expect(new ChatCompletionOptions({ seed: 42 }).toRequestPayload()).toEqual({
+      temperature: 0.7, top_p: 1.0, n: 1, seed: 42,
+    });
+    expect(new ChatCompletionOptions({ seed: 0 }).toRequestPayload().seed).toBe(0);
+    expect('seed' in new ChatCompletionOptions().toRequestPayload()).toBe(false);
+  });
+
   test('an explicit undefined falls back to the default', () => {
     const options = new ChatCompletionOptions({ temperature: undefined, n: undefined });
 
@@ -30,6 +38,7 @@ describe('ChatCompletionOptions', () => {
       temperature: 0.1,
       topP: 0.5,
       n: 2,
+      seed: 7,
       tools,
       toolChoice: 'auto',
       responseFormat: 'json_object',
