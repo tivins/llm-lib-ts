@@ -123,6 +123,8 @@ const situation = JSON.parse(response.firstChoice()!.message.content);
 
 Also `ResponseFormat.jsonObject()` (any JSON object) and `ResponseFormat.text()`. A string (`"json_object"`) is still accepted and sent as `{ type }`.
 
+Example: [`examples/structuredOutputExample.ts`](examples/structuredOutputExample.ts).
+
 Observed with llama-server b11429:
 
 - `name` and `strict` are ignored (only `json_schema.schema` is read); `name` is required by OpenAI / OpenRouter.

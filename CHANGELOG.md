@@ -6,6 +6,8 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Added
+- Exemple `examples/structuredOutputExample.ts` : réponse contrainte par un schéma JSON (`ResponseFormat.jsonSchema`), puis décodée avec `JSON.parse`. Lien depuis la section « Structured output » du README.
 
 ## [0.6.0] - 2026-10-18
 ### Changed
