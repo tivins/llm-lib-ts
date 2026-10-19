@@ -30,6 +30,7 @@ export class StubLLM implements LLMClient {
     if (message) {
       onChunk(new ChatCompletionChunk(0, message.content, message.reasoningContent, null, response.finishReason() ?? null));
     }
+    onChunk(new ChatCompletionChunk(0, '', null, null, null, response.usage));
     return response;
   }
 

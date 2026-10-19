@@ -29,6 +29,68 @@ interface StreamChoiceAccumulator {
 
 const ROLE_VALUES: readonly string[] = Object.values(Role);
 
+/**
+ * Running token counts of a stream, from the per-chunk `timings` llama.cpp sends with
+ * `timings_per_token`. Reasoning tokens are the completion tokens generated before the first
+ * answer or tool call delta of choice 0, so they include the reasoning delimiters.
+ */
+class StreamUsageTracker {
+  private promptTokens = 0;
+  private completionTokens: number | null = null;
+  private reasoningTokens: number | null = null;
+  private reasoningEnded = false;
+
+  observeTimings(timings: unknown): void {
+    if (typeof timings !== 'object' || timings === null) {
+      return;
+    }
+    const { prompt_n, cache_n, predicted_n } = timings as Record<string, unknown>;
+    if (typeof prompt_n === 'number') {
+      // prompt_n only counts the tokens evaluated now; cache_n the ones reused from the cache.
+      this.promptTokens = prompt_n + (typeof cache_n === 'number' ? cache_n : 0);
+    }
+    if (typeof predicted_n === 'number') {
+      this.completionTokens = predicted_n;
+    }
+  }
+
+  observeDelta(isReasoning: boolean, isAnswer: boolean): void {
+    if (this.reasoningEnded || this.completionTokens === null) {
+      return;
+    }
+    if (isAnswer) {
+      // The current token is the first answer token, not a reasoning one.
+      if (this.reasoningTokens !== null) {
+        this.reasoningTokens = this.completionTokens - 1;
+      }
+      this.reasoningEnded = true;
+    } else if (isReasoning) {
+      this.reasoningTokens = this.completionTokens;
+    }
+  }
+
+  /** Usage so far, or `null` when the server sends no per-chunk timings. */
+  snapshot(): Usage | null {
+    if (this.completionTokens === null) {
+      return null;
+    }
+    return new Usage(
+      this.promptTokens,
+      this.completionTokens,
+      this.promptTokens + this.completionTokens,
+      this.reasoningTokens,
+    );
+  }
+
+  /** Fills the server's final usage with the counted reasoning tokens when it reports none. */
+  withReasoning(usage: Usage): Usage {
+    if (usage.reasoningTokens === null) {
+      usage.reasoningTokens = this.reasoningTokens;
+    }
+    return usage;
+  }
+}
+
 /** HTTP client for OpenAI-compatible LLM endpoints (chat, embeddings, rerank, tokenize). */
 export class LLM implements LLMClient {
   constructor(
@@ -89,11 +151,7 @@ export class LLM implements LLMClient {
       throw new Error('LLM response missing choices');
     }
 
-    const usage = new Usage(
-      data.usage?.prompt_tokens ?? 0,
-      data.usage?.completion_tokens ?? 0,
-      data.usage?.total_tokens ?? 0,
-    );
+    const usage = Usage.fromApiShape(data.usage);
 
     const choices = data.choices.map((choice: any) => {
       const toolCalls = choice.message?.tool_calls
@@ -138,6 +196,8 @@ export class LLM implements LLMClient {
       ...options.toRequestPayload(this.defaultModel),
       stream: true,
       stream_options: { include_usage: true },
+      // llama.cpp: per-chunk `timings` give the running token counts; other servers ignore it.
+      timings_per_token: true,
     });
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -150,6 +210,7 @@ export class LLM implements LLMClient {
 
     const accumulators = new Map<number, StreamChoiceAccumulator>();
     let usage = new Usage(0, 0, 0);
+    const usageTracker = new StreamUsageTracker();
     let model = this.defaultModel ?? 'unknown';
 
     try {
@@ -192,14 +253,12 @@ export class LLM implements LLMClient {
             if (typeof event.model === 'string') {
               model = event.model;
             }
+            usageTracker.observeTimings(event.timings);
+            LLM.applyStreamEvent(event, accumulators, usageTracker, onChunk);
             if (event.usage) {
-              usage = new Usage(
-                event.usage.prompt_tokens ?? 0,
-                event.usage.completion_tokens ?? 0,
-                event.usage.total_tokens ?? 0,
-              );
+              usage = usageTracker.withReasoning(Usage.fromApiShape(event.usage));
+              onChunk(new ChatCompletionChunk(0, '', null, null, null, usage));
             }
-            LLM.applyStreamEvent(event, accumulators, onChunk);
           }
         }
       } finally {
@@ -386,6 +445,7 @@ export class LLM implements LLMClient {
   private static applyStreamEvent(
     event: Record<string, any>,
     accumulators: Map<number, StreamChoiceAccumulator>,
+    usageTracker: StreamUsageTracker,
     onChunk: (chunk: ChatCompletionChunk) => void,
   ): void {
     const choices = Array.isArray(event.choices) ? event.choices : [];
@@ -437,8 +497,14 @@ export class LLM implements LLMClient {
         acc.finishReason = finishReason;
       }
 
+      if (index === 0) {
+        usageTracker.observeDelta(Boolean(reasoningDelta), Boolean(contentDelta || toolCallDeltas));
+      }
+
       if (contentDelta || reasoningDelta || toolCallDeltas || finishReason) {
-        onChunk(new ChatCompletionChunk(index, contentDelta, reasoningDelta, toolCallDeltas, finishReason));
+        onChunk(
+          new ChatCompletionChunk(index, contentDelta, reasoningDelta, toolCallDeltas, finishReason, usageTracker.snapshot()),
+        );
       }
     }
   }

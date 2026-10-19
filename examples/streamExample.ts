@@ -13,8 +13,11 @@ const conversation = new Conversation([
     Message.user("Describe the void in exactly 15 words"),
 ]);
 
-// Each chunk carries the text generated since the previous one.
-await llm.chatCompletionStream(conversation, new ChatCompletionOptions(), chunk => {
+// Each chunk carries the text generated since the previous one, and the token usage so far.
+const response = await llm.chatCompletionStream(conversation, new ChatCompletionOptions(), chunk => {
     process.stdout.write(chunk.delta);
 });
 process.stdout.write("\n");
+
+const {promptTokens, reasoningTokens, completionTokens} = response.usage;
+console.log(`tokens: ${promptTokens} in, ${completionTokens} out (${reasoningTokens ?? 0} reasoning)`);

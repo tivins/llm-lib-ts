@@ -49,7 +49,7 @@ const options = new ChatCompletionOptions({ temperature: 0.2, model: "my-model" 
 const response = await llm.chatCompletion(conversation, options);
 response.assistantMessage()?.content;
 response.finishReason(); // "stop" | "tool_calls" | "length" | …
-response.usage;          // promptTokens / completionTokens / totalTokens
+response.usage;          // promptTokens / completionTokens / totalTokens / reasoningTokens (null if unknown)
 ```
 
 `chatCompletion` does **not** mutate the conversation: you add the assistant message yourself if you continue the thread.
@@ -65,7 +65,18 @@ const response = await llm.chatCompletionStream(conversation, options, (chunk) =
 });
 ```
 
-`ChatCompletionChunk`: `delta`, `reasoningDelta`, `toolCallDeltas`, `finishReason`.
+`ChatCompletionChunk`: `delta`, `reasoningDelta`, `toolCallDeltas`, `finishReason`, `usage`.
+
+`chunk.usage` is the token count so far. The stream asks llama.cpp for per-chunk `timings` (`timings_per_token`), so every delta carries a `Usage`; on servers that do not send them it stays `null`. A last chunk (empty `delta`) carries the server's final usage, the same object as `response.usage`; it counts the end-of-generation token, so it can be one above the last running count.
+
+`reasoningTokens` counts the tokens generated before the first answer or tool call delta, reasoning delimiters included; it is `null` when the model does not reason. The server's own `completion_tokens_details.reasoning_tokens` wins when it sends one (llama.cpp does not).
+
+```ts
+await llm.chatCompletionStream(conversation, options, (chunk) => {
+  const u = chunk.usage;
+  if (u) status(`in ${u.promptTokens} · reasoning ${u.reasoningTokens ?? 0} · out ${u.completionTokens}`);
+});
+```
 
 ### Abort
 

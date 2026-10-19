@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { ChatCompletionChunk } from '../src/ChatCompletionChunk';
 import { ChatCompletionOptions } from '../src/ChatCompletionOptions';
 import { Conversation } from '../src/Conversation';
 import { EmbeddingOptions } from '../src/EmbeddingOptions';
@@ -7,6 +8,7 @@ import { LLMRequestError } from '../src/LLMRequestError';
 import { Message } from '../src/Message';
 import { RerankOptions } from '../src/RerankOptions';
 import { Role } from '../src/Role';
+import type { Usage } from '../src/Usage';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -567,5 +569,147 @@ describe('LLM network errors', () => {
     await expect(llm.chatCompletion(new Conversation(), new ChatCompletionOptions())).rejects.toThrow(
       'fetch failed: timeout',
     );
+  });
+});
+
+describe('LLM streaming usage', () => {
+  const timings = (cache: number, prompt: number, predicted: number) => ({
+    cache_n: cache,
+    prompt_n: prompt,
+    predicted_n: predicted,
+  });
+
+  test('asks llama.cpp for per-token timings', async () => {
+    const captured: { init?: RequestInit } = {};
+    stubFetch(sseResponse(['[DONE]']), captured);
+
+    await new LLM('http://localhost:8080').chatCompletionStream(new Conversation(), new ChatCompletionOptions(), () => {});
+
+    const body = JSON.parse(captured.init?.body as string);
+    expect(body.timings_per_token).toBe(true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+  });
+
+  test('reports running usage, the reasoning switch point, then the final server usage', async () => {
+    stubFetch(
+      sseResponse([
+        // First chunk with timings: the prompt counts reused cache tokens too.
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'Hm' } }], timings: timings(5, 3, 2) }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'm.' } }], timings: timings(5, 3, 3) }),
+        // The closing reasoning tag (token 4) is never sent as a delta; token 5 is the answer.
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'Hi' } }], timings: timings(5, 3, 5) }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: '!' } }], timings: timings(5, 3, 6) }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], timings: timings(5, 3, 6) }),
+        JSON.stringify({
+          choices: [],
+          usage: { prompt_tokens: 8, completion_tokens: 6, total_tokens: 14 },
+          timings: timings(5, 3, 6),
+        }),
+        '[DONE]',
+      ]),
+    );
+
+    const chunks: ChatCompletionChunk[] = [];
+    const result = await new LLM('http://localhost:8080').chatCompletionStream(
+      new Conversation(),
+      new ChatCompletionOptions(),
+      (chunk) => chunks.push(chunk),
+    );
+
+    const usages = chunks.map((chunk) => chunk.usage?.toJSON());
+    expect(usages).toEqual([
+      { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10, completion_tokens_details: { reasoning_tokens: 2 } },
+      { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11, completion_tokens_details: { reasoning_tokens: 3 } },
+      { prompt_tokens: 8, completion_tokens: 5, total_tokens: 13, completion_tokens_details: { reasoning_tokens: 4 } },
+      { prompt_tokens: 8, completion_tokens: 6, total_tokens: 14, completion_tokens_details: { reasoning_tokens: 4 } },
+      { prompt_tokens: 8, completion_tokens: 6, total_tokens: 14, completion_tokens_details: { reasoning_tokens: 4 } },
+      { prompt_tokens: 8, completion_tokens: 6, total_tokens: 14, completion_tokens_details: { reasoning_tokens: 4 } },
+    ]);
+
+    const last = chunks[chunks.length - 1];
+    expect(last.delta).toBe('');
+    expect(last.reasoningDelta).toBeNull();
+    expect(last.finishReason).toBeNull();
+    expect(last.usage).toBe(result.usage);
+    expect(result.usage.reasoningTokens).toBe(4);
+  });
+
+  test('counts a reasoning-only stream (cut by max_tokens) entirely as reasoning', async () => {
+    stubFetch(
+      sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'a' } }], timings: timings(0, 4, 1) }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'b' } }], timings: timings(0, 4, 2) }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }], timings: timings(0, 4, 2) }),
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } }),
+      ]),
+    );
+
+    const result = await new LLM('http://localhost:8080').chatCompletionStream(
+      new Conversation(),
+      new ChatCompletionOptions(),
+      () => {},
+    );
+
+    expect(result.usage.reasoningTokens).toBe(2);
+  });
+
+  test('leaves reasoningTokens null when the model does not reason', async () => {
+    stubFetch(
+      sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'Hi' } }], timings: timings(0, 4, 1) }),
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5 } }),
+      ]),
+    );
+
+    const usages: (Usage | null)[] = [];
+    await new LLM('http://localhost:8080').chatCompletionStream(new Conversation(), new ChatCompletionOptions(), (chunk) =>
+      usages.push(chunk.usage),
+    );
+
+    expect(usages.map((usage) => usage?.reasoningTokens)).toEqual([null, null]);
+    expect(usages.map((usage) => usage?.completionTokens)).toEqual([1, 1]);
+  });
+
+  test('without per-chunk timings, only the final chunk carries usage', async () => {
+    stubFetch(
+      sseResponse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'Hm' } }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'Hi' } }] }),
+        JSON.stringify({
+          choices: [],
+          usage: { prompt_tokens: 4, completion_tokens: 9, total_tokens: 13, completion_tokens_details: { reasoning_tokens: 7 } },
+        }),
+      ]),
+    );
+
+    const usages: (Usage | null)[] = [];
+    const result = await new LLM('http://localhost:8080').chatCompletionStream(
+      new Conversation(),
+      new ChatCompletionOptions(),
+      (chunk) => usages.push(chunk.usage),
+    );
+
+    expect(usages.slice(0, 2)).toEqual([null, null]);
+    expect(usages[2]?.toJSON()).toEqual({
+      prompt_tokens: 4,
+      completion_tokens: 9,
+      total_tokens: 13,
+      completion_tokens_details: { reasoning_tokens: 7 },
+    });
+    expect(result.usage.reasoningTokens).toBe(7);
+  });
+
+  test('chatCompletion reads completion_tokens_details.reasoning_tokens', async () => {
+    stubFetch(
+      jsonResponse(200, {
+        model: 'm',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 5, total_tokens: 6, completion_tokens_details: { reasoning_tokens: 3 } },
+      }),
+    );
+
+    const result = await new LLM('http://localhost:8080').chatCompletion(new Conversation(), new ChatCompletionOptions());
+
+    expect(result.usage.reasoningTokens).toBe(3);
   });
 });

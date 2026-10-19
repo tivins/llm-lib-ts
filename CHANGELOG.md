@@ -7,6 +7,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-19
+### Added
+- `ChatCompletionChunk.usage` (`Usage | null`, dernier paramètre optionnel du constructeur) : l'usage des tokens en cours à chaque morceau du flux. `chatCompletionStream` envoie `timings_per_token: true` et lit les `timings` que llama.cpp ajoute à chaque morceau (`prompt_n + cache_n` pour le prompt, `predicted_n` pour la sortie). Un serveur sans ces `timings` laisse `usage` à `null` sur les morceaux de texte.
+- Un dernier morceau (`delta` vide, sans `finishReason`) porte l'usage final du serveur, le même objet que `response.usage`. Il compte le token de fin de génération, donc il peut dépasser d'un token le dernier compte en cours.
+- `Usage.reasoningTokens` (`number | null`, défaut `null`) : en streaming, les tokens générés avant le premier delta de réponse ou d'appel d'outil (balises de réflexion comprises) ; sinon `completion_tokens_details.reasoning_tokens` quand le serveur le fournit. `Usage.fromApiShape()` lit un objet `usage` OpenAI ; `toJSON()` n'ajoute `completion_tokens_details` que si la valeur est connue.
+- `examples/streamExample.ts` affiche l'usage en fin de réponse ; section « Stream » du README complétée.
+- Tests : `tests/LLM.test.ts` (paramètre `timings_per_token`, usage en cours, point de bascule de la réflexion, flux coupé pendant la réflexion, modèle sans réflexion, serveur sans `timings`, `reasoning_tokens` en non-streaming) ; e2e `ex160-stream-usage` (usage sur chaque morceau, croissant, morceau final égal à `response.usage`). Le `StubLLM` émet aussi le morceau final d'usage.
+
 ## [0.7.0] - 2026-10-18
 ### Added
 - Option `seed` dans `ChatCompletionOptionsInit` / `ChatCompletionOptions` : envoyée comme `seed` dans la requête seulement si elle est définie (`0` compris). Sans `seed`, la requête est inchangée.
